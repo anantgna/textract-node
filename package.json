@@ -1,0 +1,8 @@
+{
+  "dependencies": {
+    "@aws-sdk/client-textract": "^3.398.0",
+    "aws-sdk": "^2.1448.0",
+    "commander": "^11.0.0",
+    "lodash": "^4.17.21"
+  }
+}
