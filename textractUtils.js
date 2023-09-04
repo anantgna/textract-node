@@ -2,6 +2,7 @@ const _ = require("lodash");
 const aws = require("aws-sdk");
 const config = require("./config");
 
+//Add awsAccesskeyID, awsSecretAccessKey, awsRegion in .config file
 aws.config.update({
   accessKeyId: config.awsAccesskeyID,
   secretAccessKey: config.awsSecretAccessKey,
@@ -10,150 +11,138 @@ aws.config.update({
 
 const textract = new aws.Textract();
 
-// const getText = (result, blocksMap) => {
-//   let text = "";
+//Helper function for combining Query Result Pairs
+const findKeyValuePair = (keyBlock, valueMap) => {
+  let valueBlock;
+  let keyValuePair = {};
 
-//   if (_.has(result, "Relationships")) {
-//     result.Relationships.forEach((relationship) => {
-//       if (relationship.Type === "CHILD") {
-//         relationship.Ids.forEach((childId) => {
-//           const word = blocksMap[childId];
-//           if (word.BlockType === "WORD") {
-//             text += `${word.Text} `;
-//           }
-//           if (word.BlockType === "SELECTION_ELEMENT") {
-//             if (word.SelectionStatus === "SELECTED") {
-//               text += `X `;
-//             }
-//           }
-//         });
-//       }
-//     });
-//   }
+  if (keyBlock.Relationships) {
+    keyBlock.Relationships.forEach((relationship) => {
+      if (relationship.Type === "ANSWER") {
+        relationship.Ids.every((valueId) => {
+          if (_.has(valueMap, valueId)) {
+            valueBlock = valueMap[valueId];
+            return false;
+          }
+        });
+      }
+    });
+    keyValuePair = {
+      Query: keyBlock.Query.Text,
+      Value: valueBlock.Text,
+    };
+  } else {
+    keyValuePair = {
+      Query: keyBlock.Query.Text,
+      Value: undefined,
+    };
+  }
 
-//   return text.trim();
-// };
+  return keyValuePair;
+};
 
-// const findValueBlock = (keyBlock, valueMap) => {
-//   let valueBlock;
-//   keyBlock.Relationships.forEach((relationship) => {
-//     if (relationship.Type === "VALUE") {
-//       // eslint-disable-next-line array-callback-return
-//       relationship.Ids.every((valueId) => {
-//         if (_.has(valueMap, valueId)) {
-//           valueBlock = valueMap[valueId];
-//           return false;
-//         }
-//       });
-//     }
-//   });
+//Combining each query with its respective result using the id's
+const getKeyValueRelationship = (keyMap, valueMap) => {
+  const keyValues = [];
+  const keyMapValues = _.values(keyMap);
 
-//   return valueBlock;
-// };
+  keyMapValues.forEach((keyMapValue) => {
+    const keyValuePair = findKeyValuePair(keyMapValue, valueMap);
+    keyValues.push(keyValuePair);
+  });
 
-// const getKeyValueRelationship = (keyMap, valueMap, blockMap) => {
-//   const keyValues = {};
+  return keyValues;
+};
 
-//   const keyMapValues = _.values(keyMap);
+//Separating Response based on the Query and Result
+const getKeyValueMap = (blocks) => {
+  const keyMap = {};
+  const valueMap = {};
 
-//   keyMapValues.forEach((keyMapValue) => {
-//     const valueBlock = findValueBlock(keyMapValue, valueMap);
-//     const key = getText(keyMapValue, blockMap);
-//     const value = getText(valueBlock, blockMap);
-//     keyValues[key] = value;
-//   });
+  let blockId;
+  blocks.forEach((block) => {
+    blockId = block.Id;
 
-//   return keyValues;
-// };
+    if (block.BlockType === "QUERY") {
+      keyMap[blockId] = block;
+    } else if (block.BlockType === "QUERY_RESULT") {
+      valueMap[blockId] = block;
+    }
+  });
 
-// const getKeyValueMap = (blocks) => {
-//   const keyMap = {};
-//   const valueMap = {};
-//   const blockMap = {};
-
-//   let blockId;
-//   blocks.forEach((block) => {
-//     blockId = block.Id;
-//     blockMap[blockId] = block;
-
-//     if (block.BlockType === "KEY_VALUE_SET") {
-//       if (_.includes(block.EntityTypes, "KEY")) {
-//         keyMap[blockId] = block;
-//       } else {
-//         valueMap[blockId] = block;
-//       }
-//     }
-//   });
-
-//   return { keyMap, valueMap, blockMap };
-// };
+  return { keyMap, valueMap };
+};
 
 module.exports = async (buffer) => {
   const params = {
     Document: {
       Bytes: buffer,
     },
-    FeatureTypes: ["TABLES"],
-    // QueriesConfig: {
-    //   Queries: [
-    //     {
-    //       Text: "What is the insured name?",
-    //       Alias: "INSURANCE_CARD_NAME",
-    //     },
-    // {
-    //   Text: "What is the member id?",
-    //   Alias: "INSURANCE_CARD_MEMBER_ID",
-    // },
-    // {
-    //   Text: "What is the effective date?",
-    //   Alias: "INSURANCE_CARD_EFFECTIVE_DATE",
-    // },
-    // {
-    //   Text: "What is the office visit copay?",
-    //   Alias: "INSURANCE_CARD_OFFICE_VISIT_COPAY",
-    // },
-    // {
-    //   Text: "What is the specialist visit copay?",
-    //   Alias: "INSURANCE_CARD_SPEC_VISIT_COPAY",
-    // },
-    // {
-    //   Text: "What is the coinsurance amount?",
-    //   Alias: "INSURANCE_CARD_COINSURANCE",
-    // },
-    // {
-    //   Text: "What is the OOP max?",
-    //   Alias: "INSURANCE_CARD_OOP_MAX",
-    // },
-    // {
-    //   Text: "What is medical insurance provider?",
-    //   Alias: "INSURANCE_CARD_PROVIDER",
-    // },
-    // {
-    //   Text: "What is the plan type?",
-    //   Alias: "INSURANCE_CARD_PLAN_TYPE",
-    // },
-    // {
-    //   Text: "What is the level of benefits?",
-    //   Alias: "INSURANCE_CARD_LEVEL_BENEFITS",
-    // },
-    //   ],
-    // },
+
+    //FeatureTypes - ["QUERIES", "FORMS", "TABLES", "SIGNATURES"]
+    FeatureTypes: ["QUERIES"],
+
+    //Pass Queries along with Alias
+    QueriesConfig: {
+      Queries: [
+        {
+          Text: "What is the insured name?",
+          // Alias: "INSURANCE_CARD_NAME",
+        },
+        {
+          Text: "What is the member id?",
+          // Alias: "INSURANCE_CARD_MEMBER_ID",
+        },
+        {
+          Text: "What is the effective date?",
+          // Alias: "INSURANCE_CARD_EFFECTIVE_DATE",
+        },
+        {
+          Text: "What is the office visit copay?",
+          // Alias: "INSURANCE_CARD_OFFICE_VISIT_COPAY",
+        },
+        {
+          Text: "What is the specialist visit copay?",
+          // Alias: "INSURANCE_CARD_SPEC_VISIT_COPAY",
+        },
+        {
+          Text: "What is the coinsurance amount?",
+          // Alias: "INSURANCE_CARD_COINSURANCE",
+        },
+        {
+          Text: "What is the OOP max?",
+          // Alias: "INSURANCE_CARD_OOP_MAX",
+        },
+        {
+          Text: "What is medical insurance provider?",
+          // Alias: "INSURANCE_CARD_PROVIDER",
+        },
+        {
+          Text: "What is the plan type?",
+          // Alias: "INSURANCE_CARD_PLAN_TYPE",
+        },
+        {
+          Text: "What is the level of benefits?",
+          // Alias: "INSURANCE_CARD_LEVEL_BENEFITS",
+        },
+        { Text: "What is the group number?" },
+        { Text: "What Payer ID?" },
+        { Text: "What is RX BIN?" },
+        { Text: "What is RX GRP?" },
+        { Text: "What is RX PCN?" },
+      ],
+    },
   };
 
   const request = textract.analyzeDocument(params);
   const data = await request.promise();
 
-  console.log("data", data);
-  return data;
+  if (data && data.Blocks) {
+    const { keyMap, valueMap } = getKeyValueMap(data.Blocks);
+    const keyValues = getKeyValueRelationship(keyMap, valueMap);
+    return keyValues;
+  }
+
+  // in case no blocks are found return undefined
+  return undefined;
 };
-
-//   if (data && data.Blocks) {
-//     const { keyMap, valueMap, blockMap } = getKeyValueMap(data.Blocks);
-//     const keyValues = getKeyValueRelationship(keyMap, valueMap, blockMap);
-
-//     return keyValues;
-//   }
-
-//   // in case no blocks are found return undefined
-//   return undefined;
-// };
